@@ -1,0 +1,51 @@
+name: CI/CD
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: pytest -q
+
+
+build-and-push:
+  needs: test
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        aws-region: us-east-1
+    - name: Login to ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+    - name: Build, tag, and push image to ECR
+      env:
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        IMAGE_REPO_NAME: fastapi-app
+      run: |
+        IMAGE_TAG=${{ github.sha }}
+        docker build -t $ECR_REGISTRY/$IMAGE_REPO_NAME:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$IMAGE_REPO_NAME:$IMAGE_TAG
+    - name: Deploy to ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        aws-region: us-east-1
+        cluster: my-ecs-cluster
+        service: my-ecs-service
+        task-definition: ecs-task-def.json
+        wait-for-service-stability: true
